@@ -6,7 +6,7 @@ else
 	echo "Building and uploading to $1 ..."
 fi
 
-cd MinhoTeamNovoHardware &&
+cd MinhoTeamHardware &&
 ino clean &&
 ino build &&
 
