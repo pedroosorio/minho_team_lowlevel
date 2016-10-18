@@ -15,13 +15,13 @@
 // Services
 #include "minho_team_ros/requestResetEncoders.h"
 #include "minho_team_ros/requestResetIMU.h"
-#include "minho_team_ros/requestSetIMULinTable.h"
-#include "minho_team_ros/requestSetOmniProps.h"
+#include "minho_team_ros/requestIMULinTable.h"
+#include "minho_team_ros/requestOmniProps.h"
 
 using minho_team_ros::requestResetEncoders;
 using minho_team_ros::requestResetIMU;
-using minho_team_ros::requestSetOmniProps;
-using minho_team_ros::requestSetIMULinTable;
+using minho_team_ros::requestOmniProps;
+using minho_team_ros::requestIMULinTable;
 
 Servo myservo;  // create servo object to control a servo 
 
@@ -74,8 +74,8 @@ void controlInfoCallback(const minho_team_ros::controlInfo& msg);
 void teleopCallback(const minho_team_ros::teleop& msg);
 void resetEncodersService(const requestResetEncoders::Request &req, requestResetEncoders::Response &res);
 void resetIMUReferenceService(const requestResetIMU::Request &req, requestResetIMU::Response &res);
-void setOmniPropsService(const requestSetOmniProps::Request &req, requestSetOmniProps::Response &res);
-void setIMUTableService(const requestSetIMULinTable::Request &req, requestSetIMULinTable::Response &res);
+void OmniPropsService(const requestOmniProps::Request &req, requestOmniProps::Response &res);
+void IMUTableService(const requestIMULinTable::Request &req, requestIMULinTable::Response &res);
 Omni3MD omni;                       //declaration of object variable to control the Omni3MD
 
 //Variables to read from Omni3MD
@@ -142,6 +142,8 @@ ros::Subscriber<minho_team_ros::teleop> teleop_info_sub("teleop" , teleopCallbac
 
 ros::ServiceServer<requestResetEncoders::Request, requestResetEncoders::Response> server_resetEnc("requestResetEncoders",&resetEncodersService);
 ros::ServiceServer<requestResetIMU::Request, requestResetIMU::Response> server_resetIMU("requestResetIMU",&resetIMUReferenceService);
+ros::ServiceServer<requestOmniProps::Request, requestOmniProps::Response> server_OmniProps("requestOmniProps",&OmniPropsService);
+ros::ServiceServer<requestIMULinTable::Request, requestIMULinTable::Response> server_IMULinTable("requestIMULinTable",&IMUTableService);
 
 void setup() {
   setupOmni();
@@ -161,6 +163,15 @@ void setup() {
   resetEncoders();
   readPIDfromEEPROM();
   
+  nh.initNode();
+  nh.advertise(hardware_info_pub);
+  nh.subscribe(control_info_sub);
+  nh.subscribe(teleop_info_sub);
+  nh.advertiseService(server_resetEnc);
+  nh.advertiseService(server_resetIMU);
+  nh.advertiseService(server_OmniProps);
+  nh.advertiseService(server_IMULinTable);
+  
   tone(Buzzer, 4000,50);
   delay(150);
   tone(Buzzer, 4000,50);
@@ -168,13 +179,6 @@ void setup() {
   tone(Buzzer, 4000,100);
   delay(300);
   tone(Buzzer, 4000,100);
-  
-  nh.initNode();
-  nh.advertise(hardware_info_pub);
-  nh.subscribe(control_info_sub);
-  nh.subscribe(teleop_info_sub);
-  nh.advertiseService(server_resetEnc);
-  nh.advertiseService(server_resetIMU);
 }
 
 void loop() {
@@ -419,23 +423,35 @@ void resetIMUReferenceService(const requestResetIMU::Request &req, requestResetI
   Serial1.write("r");
 }
 
-void setOmniPropsService(const requestSetOmniProps::Request &req, requestSetOmniProps::Response &res)
+void OmniPropsService(const requestOmniProps::Request &req, requestOmniProps::Response &res)
 {
-  P = req.omniConf.P; I = req.omniConf.I; D = req.omniConf.D;
-  B = req.omniConf.B; N = req.omniConf.N; M = req.omniConf.M;
-  
-  omni.set_PID(P,I,D); // Adjust paramenters for PID control [word Kp, word Ki, word Kd]
-  delay(15);                 // 15ms pause required for Omni3MD eeprom writing
-  omni.set_ramp(B,N,M);   // set acceleration ramp and limiar take off parameter gain[word ramp_time, word slope, word Kl] 
-  delay(15);                 // 10ms pause required for Omni3MD eeprom writing  
-  
-  writePIDtoEEPROM();
-  delay(500);
+  if(req.is_set){ // set
+    if(req.omniConf.P>0) P = req.omniConf.P; 
+    if(req.omniConf.I>0) I = req.omniConf.I; 
+    if(req.omniConf.D>0) D = req.omniConf.D;
+    if(req.omniConf.B>0) B = req.omniConf.B; 
+    if(req.omniConf.N>0) N = req.omniConf.N; 
+    if(req.omniConf.M>0) M = req.omniConf.M;
+    
+    omni.set_PID(P,I,D); // Adjust paramenters for PID control [word Kp, word Ki, word Kd]
+    delay(15);                 // 15ms pause required for Omni3MD eeprom writing
+    omni.set_ramp(B,N,M);   // set acceleration ramp and limiar take off parameter gain[word ramp_time, word slope, word Kl] 
+    delay(15);                 // 10ms pause required for Omni3MD eeprom writing  
+    
+    writePIDtoEEPROM();
+    delay(10);
+  }
+  // send meaningful data back in any situation
+  res.omniConf.P = P; res.omniConf.I = I; res.omniConf.D = D;
+  res.omniConf.B = B; res.omniConf.N = N; res.omniConf.M = M;
 }
 
-void setIMUTableService(const requestSetIMULinTable::Request &req, requestSetIMULinTable::Response &res)
+void IMUTableService(const requestIMULinTable::Request &req, requestIMULinTable::Response &res)
 {
-  
+  if(req.is_set){ // set
+  } else{ // get
+
+  }
 }
 /* TODO: Implement ROS service/message for:
  - Servo
