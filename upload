@@ -3,17 +3,10 @@ echo "Copying source files ..."
 cp ./MinhoTeamHardware/MinhoTeamHardware/MinhoTeamHardware.ino ./MinhoTeamHardware/src/ &&
 echo "Source files successfuly copied"
 
-if [ -z "$1" ]; then 
-	echo "You should provide a serial device port name."
-	exit
-else 
-	echo "Building and uploading to $1 ..."
-fi
-
 cd MinhoTeamHardware &&
 ino clean &&
 ino build &&
 
-echo Build done correctly !
+echo Build done correctly ! &&
 
-ino upload -p $1
+ino upload

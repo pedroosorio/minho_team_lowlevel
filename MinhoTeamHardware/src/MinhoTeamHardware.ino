@@ -414,7 +414,9 @@ void resetEncodersService(const requestResetEncoders::Request &req, requestReset
 
 void resetIMUReferenceService(const requestResetIMU::Request &req, requestResetIMU::Response &res)
 {
-  Serial1.write("r");  
+  Serial1.write("r");
+  delay(10);
+  Serial1.write("r");
 }
 
 void setOmniPropsService(const requestSetOmniProps::Request &req, requestSetOmniProps::Response &res)
