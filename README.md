@@ -11,7 +11,9 @@ This node, although running in Arduino, has full ROS Support using rosserial and
 	- [x]requestResetEncoders - Reset the value of all 3 encoders
 	- [x]requestResetIMU - Reset IMU's 0º reference value
 	- [x]requestSetOmniProps - Set OMNI 3MD's PID and RAMP 
-		* Send isset = true to set, isset = false to get current config on response.
+		* Send is_set = true to set, is_set = false to get current config on response.
+		* Send omniConf.* = >0 to change a property. omniConf.x = 0 wont change.
+		* Current configuration will be returned in any case.
 	- [ ]requestIMULinTable- Set IMU linearization table
 		* Send isset = true to set, isset = false to get current config on response. 
 ### Baudrate 57600
