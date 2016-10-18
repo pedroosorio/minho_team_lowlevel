@@ -1,11 +1,13 @@
-#include <ArduinoHardware.h>
+#include <StandardCplusplus.h>
+#include <string>
+#include <sstream>
+#include <vector>
 #include <ros.h>
 #include <Wire.h>    //required by Omni3MD.cpp
 #include <Omni3MD.h>
 #include <TimerOne.h>
 #include <Servo.h> 
 #include <EEPROM.h>
-
 // Messages
 #include "minho_team_ros/hardwareInfo.h"
 #include "minho_team_ros/controlInfo.h"
@@ -22,7 +24,7 @@ using minho_team_ros::requestResetEncoders;
 using minho_team_ros::requestResetIMU;
 using minho_team_ros::requestOmniProps;
 using minho_team_ros::requestIMULinTable;
-
+using namespace std;
 Servo myservo;  // create servo object to control a servo 
 
 /////////////////////////////MOTORS VARS//////////////////////////
@@ -64,12 +66,15 @@ Servo myservo;  // create servo object to control a servo
 #define MMSB 10
 #define MLSB 11
 #define IMULINSTEP 12
-// EEPROM bytes from addr 12 to 360/read(IMULINSTEP) are reserved
+// EEPROM bytes from addr 12 to (360/read(IMULINSTEP))*2 are reserved
+
 void readEncoders();
 void setupOmni();
 void setupMotorsBoard();
 void writePIDtoEEPROM();
 void readPIDfromEEPROM();
+void writeIMUtoEEPROM();
+void readIMUfromEEPROM();
 void controlInfoCallback(const minho_team_ros::controlInfo& msg);
 void teleopCallback(const minho_team_ros::teleop& msg);
 void resetEncodersService(const requestResetEncoders::Request &req, requestResetEncoders::Response &res);
@@ -133,6 +138,15 @@ unsigned long comunicationTimeOutTimeStamp = 0;
 
 int servo01 = 180,servo02 = 120;
 bool teleop_active = false;
+// ######### IMU LINEARIZATION ######### 
+// Standard values
+int step = 45;
+vector<unsigned int> imu_values,real_values;
+vector<double> b,m;
+unsigned int *vals;
+void setupIMULinearization();
+void updateIMULinearization();
+int correctImuAngle(int angle);
 // ######### ROS DATA ######### 
 ros::NodeHandle  nh;
 minho_team_ros::hardwareInfo hwinfo_msg;
@@ -148,7 +162,8 @@ ros::ServiceServer<requestIMULinTable::Request, requestIMULinTable::Response> se
 void setup() {
   setupOmni();
   setupMotorsBoard();
-
+  setupIMULinearization();
+  
   pinMode(KICKPIN, OUTPUT);
   digitalWrite(KICKPIN, LOW);
   
@@ -160,8 +175,14 @@ void setup() {
   Serial1.begin(9600);
   Serial1.flush();
   
+  // On signal
+  tone(Buzzer, 3000,500);
+  delay(300);
+  tone(Buzzer, 4000,250);
+  
   resetEncoders();
   readPIDfromEEPROM();
+  readIMUfromEEPROM();
   
   nh.initNode();
   nh.advertise(hardware_info_pub);
@@ -172,6 +193,13 @@ void setup() {
   nh.advertiseService(server_OmniProps);
   nh.advertiseService(server_IMULinTable);
   
+  while (!nh.connected()){
+    nh.spinOnce();
+  }
+ 
+  // Ready Signal
+  nh.logwarn("MinhoTeam's ArduinoBox connected to ROS");
+
   tone(Buzzer, 4000,50);
   delay(150);
   tone(Buzzer, 4000,50);
@@ -188,6 +216,7 @@ void loop() {
     omni.stop_motors();
     hwinfo_msg.free_wheel_activated = true;
   } else if(analogRead(FreeWheelButton)<500 && hwinfo_msg.free_wheel_activated) hwinfo_msg.free_wheel_activated = false;
+  
   // Safety timeout
   if(millis()-comunicationTimeOutTimeStamp>comunicationTimeOutLimitTime){
     omni.stop_motors();
@@ -198,7 +227,7 @@ void loop() {
     String S1 = Serial1.readStringUntil('\n');
     char buffer[10];
     S1.toCharArray(buffer, 10);
-    hwinfo_msg.imu_value = atof(buffer);
+    hwinfo_msg.imu_value = correctImuAngle(atof(buffer));
   }
   // Read Batteries
   if(millis()-baterryTimeStamp>baterryLimitTime){
@@ -369,6 +398,38 @@ void readPIDfromEEPROM()
   N = (EEPROM.read(NMSB)<<8)|(EEPROM.read(NLSB)); 
   M = (EEPROM.read(MMSB)<<8)|(EEPROM.read(MLSB));
 }
+
+void writeIMUtoEEPROM()
+{
+  EEPROM.write(IMULINSTEP,step);
+  int base_address = IMULINSTEP+1;
+  int k = 0;
+  for(int i=0;i<imu_values.size();i++){
+    EEPROM.write(base_address+k,imu_values[i]>>8);   
+    EEPROM.write(base_address+k+1,imu_values[i]);
+    k+=2;
+  } 
+}
+
+void readIMUfromEEPROM()
+{
+  step = EEPROM.read(IMULINSTEP);
+  imu_values.clear(); 
+  real_values.clear();
+  
+  int base_address = IMULINSTEP+1;
+  for(int i=0;i<=360;i+=step) { real_values.push_back(i); }
+  int k = 0;
+  for(int j=0;j<real_values.size();j++) { imu_values.push_back((EEPROM.read(base_address+k)<<8)|(EEPROM.read(base_address+k+1))); k+=2;}
+ 
+  b.clear(); 
+  m.clear();
+  for(int i=0;i<real_values.size()-1;i++){
+    m.push_back((double)(real_values[i+1]-real_values[i])/(double)(imu_values[i+1]-imu_values[i]));
+    b.push_back((double)real_values[i+1]-m[i]*((double)imu_values[i+1]));
+  }
+  
+}
 void controlInfoCallback(const minho_team_ros::controlInfo& msg)
 {
   if((teleop_active && msg.is_teleop)||(!teleop_active && !msg.is_teleop)){
@@ -448,13 +509,57 @@ void OmniPropsService(const requestOmniProps::Request &req, requestOmniProps::Re
 
 void IMUTableService(const requestIMULinTable::Request &req, requestIMULinTable::Response &res)
 {
-  if(req.is_set){ // set
-  } else{ // get
-
-  }
+  bool changing_step = false;
+  if(req.is_set && req.imuConf.step>0){ // set
+    //Read from EEPROM configs and generate real_values and imu_values
+    if(req.imuConf.step>0) changing_step = true;
+    if((360/req.imuConf.step) == req.imuConf.imu_values_length-1){
+      if(changing_step) step = req.imuConf.step;
+      imu_values.clear(); real_values.clear();
+      for(int i=0;i<=360;i+= step) { real_values.push_back(i); }
+      for(int j=0;j<real_values.size();j++) { imu_values.push_back(req.imuConf.imu_values[j]); }
+      
+      updateIMULinearization();
+      writeIMUtoEEPROM();
+    } else {
+      nh.logerror("Wrong configuration for IMU Linearization Table");
+    }
+  } 
+  
+  res.imuConf.step = step;
+  free(vals);
+  vals = (unsigned int*)malloc(sizeof(unsigned int)*(360/step));
+  for(int i=0;i<imu_values.size();i++) vals[i] = imu_values[i];
+  res.imuConf.imu_values = vals;
+  res.imuConf.imu_values_length = imu_values.size();
+  // send meaningful data back in any situation
 }
-/* TODO: Implement ROS service/message for:
- - Servo
- - Write/Read Omni Config to EEPROM
- - 
-*/
+
+void setupIMULinearization()
+{
+  // Read from EEPROM
+  imu_values.clear(); real_values.clear();
+  for(int i=0;i<=360;i+= step) { real_values.push_back(i); imu_values.push_back(i); }
+  b.clear(); m.clear();
+  for(int i=0;i<real_values.size()-1;i++){
+    m.push_back((double)(real_values[i+1]-real_values[i])/(double)(imu_values[i+1]-imu_values[i]));
+    b.push_back((double)real_values[i+1]-m[i]*((double)imu_values[i+1]));
+  }
+  vals = (unsigned int*)malloc(sizeof(unsigned int)*(360/step));
+}
+
+void updateIMULinearization()
+{
+  b.clear(); m.clear();
+  for(int i=0;i<real_values.size()-1;i++){
+    m.push_back((double)(real_values[i+1]-real_values[i])/(double)(imu_values[i+1]-imu_values[i]));
+    b.push_back((double)real_values[i+1]-m[i]*((double)imu_values[i+1]));
+  }    
+}
+
+int correctImuAngle(int angle)
+{
+  int counter = 0;
+  while(angle>imu_values[counter] && counter<imu_values.size()) counter++;
+  return (int)b[counter-1]+m[counter-1]*angle;
+}
