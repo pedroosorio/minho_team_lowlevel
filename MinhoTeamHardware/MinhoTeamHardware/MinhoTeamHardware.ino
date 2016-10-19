@@ -448,10 +448,13 @@ void controlInfoCallback(const minho_team_ros::controlInfo& msg)
     //if(direct_dribler1!="2") analogWrite(DRIBLLER1, vel_dribler1.toInt());     //PWM Speed Control  
     //if(direct_dribler2!="2") analogWrite(DRIBLLER2, vel_dribler2.toInt());     //PWM Speed Control  
     
-    int kickTime = (msg.kick_strength*maxKick)/100;
-    if(kickTime>0)
+    int maxTime = maxKick;
+    if(msg.kick_is_pass) maxTime = 10;
+    int kickTime = (msg.kick_strength*maxTime)/100;
+    
+    if(kickTime>0 && hwinfo_msg.ball_sensor==1)
     {
-      if(kickTime>maxKick)kickTime = maxKick;
+      if(kickTime>maxTime)kickTime = maxTime;
       if(kickTime<0)kickTime = 0;
       
       digitalWrite(KICKPIN, HIGH);
